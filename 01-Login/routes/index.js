@@ -17,25 +17,29 @@ router.get('/', function(req, res, next) {
 router.get('/login', passport.authenticate('auth0', {
   clientID: env.AUTH0_CLIENT_ID,
   domain: env.AUTH0_DOMAIN,
-  redirectUri: env.AUTH0_CALLBACK_URL,
+  session: false,
   responseType: 'code',
   audience: 'https://' + env.AUTH0_DOMAIN + '/userinfo',
   scope: 'openid profile'}),
   function(req, res) {
+    console.log('login continue after auth call');
     res.redirect("/");
 });
 
 router.get('/logout', function(req, res) {
-  req.logout();
+  res.clearCookie('jwtToken');
   res.redirect('/');
 });
 
 router.get('/callback',
   passport.authenticate('auth0', {
-    failureRedirect: '/failure'
+    session: false,
   }),
   function(req, res) {
-    res.redirect(req.session.returnTo || '/user');
+    console.log('callback continue after auth call', req.user.tokenExpirationDate);
+    req.user.profile = req.user.payload.Profile;
+    res.cookie('jwtToken', req.user.jwtToken, { expires: req.user.tokenExpirationDate, httpOnly: true })
+    res.redirect('/user');
   }
 );
 

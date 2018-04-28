@@ -4,11 +4,11 @@ const favicon = require('serve-favicon');
 const logger = require('morgan');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
-const session = require('express-session');
 const dotenv = require('dotenv');
 const passport = require('passport');
 const Auth0Strategy = require('passport-auth0');
 const flash = require('connect-flash');
+const jwt = require('jsonwebtoken');
 
 dotenv.load();
 
@@ -24,24 +24,28 @@ const strategy = new Auth0Strategy(
     callbackURL:
       process.env.AUTH0_CALLBACK_URL || 'http://localhost:3000/callback'
   },
-  function(accessToken, refreshToken, extraParams, profile, done) {
+  function(accessToken, refreshToken, extraParams, payload, done) {
     // accessToken is the token to call Auth0 API (not needed in the most cases)
     // extraParams.id_token has the JSON Web Token
     // profile has all the information from the user
-    return done(null, profile);
+    console.log('strategy callback');
+    const jwtToken = extraParams.id_token;
+    let tokenExpirationDate;
+    try {
+      const jwtPayload = jwt.verify(jwtToken, process.env.AUTH0_CLIENT_SECRET);
+      console.log('jwt.verify(jwtToken) HS256', jwtPayload);
+      tokenExpirationDate = new Date(jwtPayload.exp*1000);
+    }
+    catch (e) {
+      // Most likely invalid signature (wrong key, or hack attempt)
+      console.error(e);
+      return done(null, false);
+    }
+    return done(null, { payload, jwtToken, tokenExpirationDate });
   }
 );
 
 passport.use(strategy);
-
-// you can use this section to keep a smaller payload
-passport.serializeUser(function(user, done) {
-  done(null, user);
-});
-
-passport.deserializeUser(function(user, done) {
-  done(null, user);
-});
 
 const app = express();
 
@@ -55,15 +59,7 @@ app.use(logger('dev'));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cookieParser());
-app.use(
-  session({
-    secret: 'shhhhhhhhh',
-    resave: true,
-    saveUninitialized: true
-  })
-);
 app.use(passport.initialize());
-app.use(passport.session());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(flash());
@@ -82,8 +78,17 @@ app.use(function(req, res, next) {
 // Check logged in
 app.use(function(req, res, next) {
   res.locals.loggedIn = false;
-  if (req.session.passport && typeof req.session.passport.user != 'undefined') {
-    res.locals.loggedIn = true;
+  console.log('check logged in jwtToken', req.cookies.jwtToken);
+  if (req.cookies.jwtToken) {
+    try {
+      const jwtPayload = jwt.verify(req.cookies.jwtToken, process.env.AUTH0_CLIENT_SECRET);
+      res.locals.loggedIn = true;
+      res.locals.user = jwtPayload;
+    }
+    catch (e) {
+      // Most likely invalid signature (wrong key, or hack attempt)
+      console.error(e);
+    }
   }
   next();
 });
